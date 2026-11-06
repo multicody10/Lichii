@@ -263,9 +263,10 @@ public:
             {6, &INx2SysmixStreamSession::Succeed, "ReleaseStreamStateChangeEvent"},
             {7, &INx2SysmixStreamSession::AcquireDataEvent, "AcquireStreamDataEvent"},
             {8, &INx2SysmixStreamSession::ReleaseDataEvent, "ReleaseStreamDataEvent"},
-            {9, &INx2SysmixStreamSession::Unsupported, "ClockStream"},
-            {10, &INx2SysmixStreamSession::Unsupported, "PrimeStream"},
-            {11, &INx2SysmixStreamSession::Unsupported, "PurgeStream"},
+            // Preserve the compatibility behavior used by the upstream nx2 implementation.
+            {9, &INx2SysmixStreamSession::Succeed, "ClockStream"},
+            {10, &INx2SysmixStreamSession::EchoFrames, "PrimeStream"},
+            {11, &INx2SysmixStreamSession::EchoFrames, "PurgeStream"},
             {12, &INx2SysmixStreamSession::Succeed, "RenameStream"},
         };
         RegisterHandlers(functions);
@@ -350,9 +351,12 @@ private:
         rb.Push(result);
     }
 
-    void Unsupported(HLERequestContext& ctx) {
-        IPC::ResponseBuilder rb{ctx, 2};
-        rb.Push(ResultNotSupported);
+    void EchoFrames(HLERequestContext& ctx) {
+        IPC::RequestParser rp{ctx};
+        const auto frames = rp.Pop<s32>();
+        IPC::ResponseBuilder rb{ctx, 3};
+        rb.Push(ResultSuccess);
+        rb.Push<u32>(static_cast<u32>((std::max)(frames, 0)));
     }
 
     void Succeed(HLERequestContext& ctx) {
