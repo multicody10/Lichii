@@ -6,6 +6,7 @@ on:
       - nx2
     paths:
       - ".github/workflows/release-oot-fixes.yml"
+      - "src/**"
   workflow_dispatch:
 
 permissions:
@@ -157,6 +158,8 @@ jobs:
 
           - **Real-time game speed correction:** prevents Ocarina of Time gameplay and cutscenes from slowing down proportionally when rendering falls below 60 FPS. The built-in timing patch is guarded by the known game title ID, main-module build ID, and expected hook instruction.
           - **Vulkan deferred-submission fence fix:** flushes deferred Vulkan work before waiting on the associated fence, addressing a specific deadlock scenario.
+
+          - **GPU readback stall reduction:** native titles preflush GPU-written memory instead of trapping and waiting on every CPU read. Set `EDEN_NX2_PREFLUSH=0` to restore the previous on-demand behavior for comparison.
 
           ## Important limitations
 
