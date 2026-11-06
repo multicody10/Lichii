@@ -106,3 +106,7 @@ Use these before guessing. All are off unless the variable is set; pass them as 
 
 - Experiment switches (env flags that pick between candidate fixes) never merge to nx2. A proven fix ships as unconditional behaviour, and a disproven one is dropped.
 - Diagnostic tools (frame dump, `EDEN_NX2_REJECT_HASH`, traces, the debug server) stay in nx2, off unless their variable is set.
+
+## Emulator issue workflow
+
+For any game compatibility, performance, audio, rendering, or stability investigation, follow [`docs/nx2/emulator-issue-workflow.md`](docs/nx2/emulator-issue-workflow.md). It defines the evidence, regression, and real-hardware validation required before calling a change fixed. In particular, treat FPS, game speed, frame pacing, audio/video synchronization, and freezes as separate dimensions.
