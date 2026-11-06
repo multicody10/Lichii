@@ -28,6 +28,11 @@ struct SysmixOutputCounters {
     u64 admitted_blocks{};
     u64 backpressure{};
     u64 faults{};
+    u64 partial_blocks{};
+    u64 empty_blocks{};
+    u64 padded_frames{};
+    u32 max_source_occupancy{};
+    u32 min_source_occupancy{};
 };
 
 class SysmixOutput {
