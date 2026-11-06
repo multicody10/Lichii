@@ -20,6 +20,9 @@ jobs:
     name: Build and publish Windows x64 release
     runs-on: windows-2022
     timeout-minutes: 120
+    env:
+      SCCACHE_DIR: ${{ github.workspace }}/.sccache
+      SCCACHE_CACHE_SIZE: 3G
     steps:
       - name: Check out merged source
         uses: actions/checkout@v4
@@ -39,6 +42,15 @@ jobs:
           modules: qtcharts
           cache: true
 
+      - name: Install sccache
+        shell: pwsh
+        run: |
+          $zip = Join-Path $env:RUNNER_TEMP 'sccache.zip'
+          Invoke-WebRequest -OutFile $zip https://github.com/mozilla/sccache/releases/download/v0.19.0/sccache-v0.19.0-x86_64-pc-windows-msvc.zip
+          Expand-Archive $zip -DestinationPath (Join-Path $env:RUNNER_TEMP 'sccache')
+          $bin = (Get-ChildItem -Recurse -Filter sccache.exe (Join-Path $env:RUNNER_TEMP 'sccache')).DirectoryName
+          $bin | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+
       - name: Install Vulkan SDK
         shell: pwsh
         run: ./tools/windows/install-vulkan-sdk.ps1
@@ -49,6 +61,29 @@ jobs:
           cmake --version
           ninja --version
           glslangValidator --version
+          sccache --version
+
+      - name: Restore CPM downloads
+        id: cpm-cache
+        uses: actions/cache/restore@v5
+        with:
+          path: .cache/cpm
+          key: cpm-windows-x86_64-v2-${{ hashFiles('cpmfile.json', 'CMakeLists.txt', 'CMakeModules/CPM*.cmake', 'externals/**/CMakeLists.txt', 'src/**/CMakeLists.txt') }}
+          restore-keys: |
+            cpm-windows-x86_64-v2-
+            cpm-Windows-
+
+      - name: Restore compiler objects
+        id: compiler-cache
+        uses: actions/cache/restore@v5
+        with:
+          path: |
+            .ccache
+            .sccache
+          key: objects-windows-x86_64-v2-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            objects-windows-x86_64-v2-${{ github.sha }}-
+            objects-windows-x86_64-v2-
 
       - name: Configure Release
         shell: bash
@@ -67,10 +102,36 @@ jobs:
           -DLICHII_BUILD_TAG=oot-fixes-${{ github.run_number }}
           -DLICHII_BUILD_PLATFORM=windows-x86_64
           -DUSE_DISCORD_PRESENCE=OFF
+          -DCMAKE_C_COMPILER_LAUNCHER=sccache
+          -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
+
+      - name: Save CPM downloads
+        if: steps.cpm-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: .cache/cpm
+          key: ${{ steps.cpm-cache.outputs.cache-primary-key }}
 
       - name: Compile
         shell: pwsh
-        run: cmake --build build/release --target yuzu yuzu-cmd --parallel
+        run: |
+          sccache --zero-stats
+          cmake --build build/release --target yuzu yuzu-cmd --parallel
+          sccache --show-stats
+
+      - name: Stop sccache
+        if: always() && steps.compiler-cache.outcome == 'success'
+        shell: pwsh
+        run: sccache --stop-server
+
+      - name: Save compiler objects
+        if: always() && steps.compiler-cache.outcome == 'success'
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            .ccache
+            .sccache
+          key: ${{ steps.compiler-cache.outputs.cache-primary-key }}
 
       - name: Package Windows build
         shell: pwsh
