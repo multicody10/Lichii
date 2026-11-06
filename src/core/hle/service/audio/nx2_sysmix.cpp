@@ -184,6 +184,7 @@ Result SysmixOutput::Open(u32 sample_type, u32 channels, u32 rate, u32 frames, u
     p.engaged = false;
     p.gain = 1.0f;
     p.counters = {};
+    p.counters.min_source_occupancy = std::numeric_limits<u32>::max();
     p.state_event->Signal(p.system.Kernel());
     p.Notify(static_cast<u32>((write + slots - read) % slots));
     LOG_INFO(Service_Audio,
@@ -259,6 +260,8 @@ void SysmixOutput::Pump() {
         p.Fault();
         return;
     }
+    p.counters.max_source_occupancy = std::max(p.counters.max_source_occupancy, filled);
+    p.counters.min_source_occupancy = std::min(p.counters.min_source_occupancy, filled);
     if (!p.engaged) {
         p.Notify(filled);
         return;
@@ -316,6 +319,13 @@ void SysmixOutput::Pump() {
         return;
     }
     ++p.counters.admitted_blocks;
+    if (taken < BlockFrames) {
+        ++p.counters.partial_blocks;
+        p.counters.padded_frames += BlockFrames - taken;
+        if (taken == 0) {
+            ++p.counters.empty_blocks;
+        }
+    }
     const u32 next = (read + taken) % p.slots;
     u32 checked{};
     if (!memory.Read32Acquire(p.buffer + ReadOffset, checked) || checked != read ||
@@ -335,10 +345,13 @@ void SysmixOutput::Pump() {
     if (p.counters.admitted_blocks <= 3 || p.counters.ticks % 400 == 0 ||
         (nonzero && p.counters.nonzero_frames == nonzero)) {
         LOG_INFO(Service_Audio,
-                 "sysmix stream {} output: copied={} accepted={} nonzero={} blocks={} full={} queued={}",
-                 p.id, p.counters.copied_frames, p.counters.accepted_frames,
-                 p.counters.nonzero_frames, p.counters.admitted_blocks, p.counters.backpressure,
-                 p.host->GetQueueSize());
+                 "sysmix stream {} output: available={} copied={} accepted={} nonzero={} blocks={} "
+                 "partial={} empty={} padded={} source_fill_max={} source_fill_min={} full={} queued={}",
+                 p.id, filled, p.counters.copied_frames, p.counters.accepted_frames,
+                 p.counters.nonzero_frames, p.counters.admitted_blocks, p.counters.partial_blocks,
+                 p.counters.empty_blocks, p.counters.padded_frames,
+                 p.counters.max_source_occupancy, p.counters.min_source_occupancy,
+                 p.counters.backpressure, p.host->GetQueueSize());
     }
 }
 
