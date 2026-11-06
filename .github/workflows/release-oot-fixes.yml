@@ -1,0 +1,124 @@
+name: Release OOT fixes (Windows)
+
+on:
+  push:
+    branches:
+      - nx2
+    paths:
+      - ".github/workflows/release-oot-fixes.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-oot-fixes-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  windows-release:
+    name: Build and publish Windows x64 release
+    runs-on: windows-2022
+    timeout-minutes: 120
+    steps:
+      - name: Check out merged source
+        uses: actions/checkout@v4
+        with:
+          ref: nx2
+
+      - name: Set up MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.8.3"
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          modules: qtcharts
+          cache: true
+
+      - name: Install Vulkan SDK
+        shell: pwsh
+        run: ./tools/windows/install-vulkan-sdk.ps1
+
+      - name: Verify build tools
+        shell: pwsh
+        run: |
+          cmake --version
+          ninja --version
+          glslangValidator --version
+
+      - name: Configure Release
+        shell: bash
+        run: >-
+          cmake -S . -B build/release -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DBUILD_TESTING=OFF
+          -DYUZU_TESTS=OFF
+          -DYUZU_CMD=ON
+          -DYUZU_ROOM=OFF
+          -DYUZU_ROOM_STANDALONE=OFF
+          -DYUZU_USE_BUNDLED_QT=OFF
+          -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR"
+          -DYUZU_USE_BUNDLED_SDL3=ON
+          -DENABLE_UPDATE_CHECKER=ON
+          -DLICHII_BUILD_TAG=oot-fixes-${{ github.run_number }}
+          -DLICHII_BUILD_PLATFORM=windows-x86_64
+          -DUSE_DISCORD_PRESENCE=OFF
+
+      - name: Compile
+        shell: pwsh
+        run: cmake --build build/release --target yuzu yuzu-cmd --parallel
+
+      - name: Package Windows build
+        shell: pwsh
+        run: |
+          $bin = "build/release/bin"
+          foreach ($exe in @("lichii.exe", "eden-cli.exe")) {
+            if (-not (Test-Path "$bin/$exe")) {
+              throw "Expected executable was not produced: $bin/$exe"
+            }
+          }
+          windeployqt --release --no-translations "$bin/lichii.exe"
+          $archive = "Lichii-Windows-x64-MSVC-oot-fixes-${{ github.run_number }}.zip"
+          Compress-Archive -Path "$bin/*" -DestinationPath $archive
+          Get-Item $archive | Format-List Name,Length
+
+      - name: Prepare release notes
+        shell: bash
+        run: |
+          cat > release-notes.md <<'EOF'
+          ## Ocarina of Time fixes
+
+          This experimental Windows x64 build includes two targeted changes:
+
+          - **Real-time game speed correction:** prevents Ocarina of Time gameplay and cutscenes from slowing down proportionally when rendering falls below 60 FPS. The built-in timing patch is guarded by the known game title ID, main-module build ID, and expected hook instruction.
+          - **Vulkan deferred-submission fence fix:** flushes deferred Vulkan work before waiting on the associated fence, addressing a specific deadlock scenario.
+
+          ## Important limitations
+
+          - This does not increase the emulator's rendering FPS. It corrects game timing when FPS is below target.
+          - The timing patch only applies to the exact supported Ocarina of Time build. Other game builds are left unchanged.
+          - The Vulkan change targets a specific deferred-submission deadlock; it is not a claim that every freeze or audio issue is fixed.
+          - This is an experimental fork build and has not been validated across a broad range of games or hardware.
+
+          ## Install
+
+          1. Download the Windows x64 MSVC ZIP asset below.
+          2. Extract the entire archive to a new folder.
+          3. Run lichii.exe.
+
+          Keep your existing emulator folder and user data backed up. This archive does not include game files, firmware, or encryption keys.
+          EOF
+
+      - name: Publish GitHub prerelease
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="oot-fixes-test-${GITHUB_RUN_NUMBER}"
+          archive="Lichii-Windows-x64-MSVC-oot-fixes-${GITHUB_RUN_NUMBER}.zip"
+          gh release create "$tag" "$archive"             --repo "$GITHUB_REPOSITORY"             --target "$GITHUB_SHA"             --prerelease             --title "Lichii Ocarina of Time Fixes (Windows x64) #${GITHUB_RUN_NUMBER}"             --notes-file release-notes.md
