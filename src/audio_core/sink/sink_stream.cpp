@@ -250,10 +250,23 @@ void SinkStream::ProcessAudioOutAndRender(std::span<s16> output_buffer, std::siz
             level_peak = std::max<s32>(level_peak, std::abs(static_cast<s32>(output_buffer[i])));
         }
         level_frames += num_frames;
+        underrun_frames += num_frames - actual_frames_written;
+        if (actual_frames_written < num_frames) {
+            ++underrun_callbacks;
+        }
         if (level_frames >= TargetSampleRate * 2) {
-            LOG_INFO(Audio, "Audio output peak over {} frames: {} of 32767", level_frames, level_peak);
+            const f32 underrun_percent =
+                level_frames == 0 ? 0.0f : 100.0f * static_cast<f32>(underrun_frames) /
+                                                  static_cast<f32>(level_frames);
+            LOG_INFO(Audio,
+                     "Audio output: peak={} of 32767, callbacks={} frames, underrun={} frames "
+                     "({:.2f}%), underrun_callbacks={}, queued_buffers={}",
+                     level_peak, level_frames, underrun_frames, underrun_percent,
+                     underrun_callbacks, queued_buffers.load());
             level_frames = 0;
             level_peak = 0;
+            underrun_frames = 0;
+            underrun_callbacks = 0;
         }
     }
 
