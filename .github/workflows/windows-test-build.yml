@@ -1,0 +1,91 @@
+name: Windows test build
+
+on:
+  push:
+    branches:
+      - investigate/oot-audio-render-timing
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-test-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-msvc:
+    name: Windows x64 MSVC release build
+    runs-on: windows-2022
+    timeout-minutes: 120
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.8.3"
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          modules: qtcharts
+          cache: true
+
+      - name: Install Vulkan SDK
+        shell: pwsh
+        run: ./tools/windows/install-vulkan-sdk.ps1
+
+      - name: Verify build tools
+        shell: pwsh
+        run: |
+          cmake --version
+          ninja --version
+          glslangValidator --version
+
+      - name: Configure
+        shell: bash
+        run: >-
+          cmake -S . -B build/release -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DBUILD_TESTING=OFF
+          -DYUZU_TESTS=OFF
+          -DYUZU_CMD=ON
+          -DYUZU_ROOM=OFF
+          -DYUZU_ROOM_STANDALONE=OFF
+          -DYUZU_USE_BUNDLED_QT=OFF
+          -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR"
+          -DYUZU_USE_BUNDLED_SDL3=ON
+          -DENABLE_UPDATE_CHECKER=ON
+          -DLICHII_BUILD_TAG=test-${{ github.run_number }}
+          -DLICHII_BUILD_PLATFORM=windows-x86_64
+          -DUSE_DISCORD_PRESENCE=OFF
+
+      - name: Build
+        shell: pwsh
+        run: cmake --build build/release --target yuzu yuzu-cmd --parallel
+
+      - name: Package Windows binaries
+        shell: pwsh
+        run: |
+          $bin = "build/release/bin"
+          foreach ($exe in @("lichii.exe", "eden-cli.exe")) {
+            if (-not (Test-Path "$bin/$exe")) {
+              throw "Expected executable was not produced: $bin/$exe"
+            }
+          }
+          windeployqt --release --no-translations "$bin/lichii.exe"
+          $archive = "Lichii-Windows-x64-MSVC-${{ github.sha }}.zip"
+          Compress-Archive -Path "$bin/*" -DestinationPath $archive
+          Get-Item $archive | Format-List Name,Length
+
+      - name: Upload installable build
+        uses: actions/upload-artifact@v4
+        with:
+          name: Lichii-Windows-x64-MSVC
+          path: Lichii-Windows-x64-MSVC-${{ github.sha }}.zip
+          if-no-files-found: error
+          retention-days: 14
